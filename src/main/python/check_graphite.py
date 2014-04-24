@@ -24,6 +24,7 @@
 # IS24: Add sixSigma at Thu Feb 20 16:10:17 CET 2014
 
 from NagAconda import Plugin
+import argparse
 import urllib2
 import sys
 
@@ -42,6 +43,23 @@ def f_max(values):
 
 def f_sum(values):
   return sum(values)
+
+
+def exit_ok(error_message):
+    print "OK: %s" % error_message
+    sys.exit(0)
+
+def exit_warning(error_message):
+    print "Warning: %s" % error_message
+    sys.exit(1)
+
+def exit_critical(error_message):
+    print "Critical: %s" % error_message
+    sys.exit(2)
+
+def exit_unknown(error_message):
+    print "Unknown: %s" % error_message
+    sys.exit(3)
 
 # Methods for Holt-Winters
 def eval_graphite_data(data, seconds):
@@ -110,7 +128,19 @@ def check_max_none_values(values):
     if percent_nones > none_limit:
         print "%s, over %s percent (limit) of values are None. (sum values : %s, sum \"None\" : %s, percent \"None\": %.2f%%)" % (status_output,str(none_limit),str(len(values)),str(values.count("None")),percent_nones) 
         sys.exit(nones_exceeded_exit_code)           
-    return 
+    return
+
+# retrieve data from graphite host
+def get_data_from_graphite(url):
+    req = urllib2.Request(url, headers={'Accept-Encoding': ''})
+    usock = urllib2.urlopen(req)
+    data = usock.read().rstrip()
+    usock.close()
+
+    if graphite.options.debug == 'yes':
+        print "\n[Debug] Origin data from Graphite:\n%s" % data
+
+    return data
 
 functionmap = {
   "hw":{  "label": "hw", "function": f_hw },
@@ -153,17 +183,10 @@ if graphite.options.hostname:
     graphite.options.url = graphite.options.url.replace('@HOSTNAME@', 
     graphite.options.hostname.replace('.','_'))
 
-
-req = urllib2.Request(graphite.options.url,headers={'Accept-Encoding': ''})
-usock = urllib2.urlopen(req)
-data = usock.read().rstrip()
-usock.close()
-
-if graphite.options.debug == 'yes':
-    print "\n[Debug] Origin data from Graphite:\n%s" % data
-
 if graphite.options.function not in functionmap:
     graphite.unknown_error("Bad function name given to -f/--function option: '%s'" % graphite.options.function)
+
+data = get_data_from_graphite(graphite.options.url)
 
 if graphite.options.function in ['hw', 'sixSigma']:
     if graphite.options.function == 'hw':
