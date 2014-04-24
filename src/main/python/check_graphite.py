@@ -44,6 +44,18 @@ def f_max(values):
 def f_sum(values):
   return sum(values)
 
+def f_hw(values):
+    pass
+
+functionmap = {
+  "hw":{  "label": "hw", "function": f_hw },
+  "sixSigma":{  "label": "sixSigma", "function": lambda x: None},
+  "avg":{  "label": "average", "function": f_avg },
+  "last":{ "label": "last",    "function": f_last },
+  "min":{  "label": "minimum", "function": f_min },
+  "max":{  "label": "maximum", "function": f_max },
+  "sum":{  "label": "sum",  "function": f_sum }
+}
 
 def exit_ok(error_message):
     print "OK: %s" % error_message
@@ -92,7 +104,7 @@ def eval_graphite_data(data, seconds):
     return data_value
 
 def get_confindence_bands(hwdata, seconds=0, prefix='holtWintersConfidence'):
-    """Get confidene bands value from a Graphite graph"""
+    """Get confidence bands value from a Graphite graph"""
 
     data = hwdata
     for line in data.split('\n'):
@@ -107,149 +119,113 @@ def get_confindence_bands(hwdata, seconds=0, prefix='holtWintersConfidence'):
 
     return graphite_data, graphite_lower, graphite_upper
   
-def f_hw(values):
-    pass
 
-# is24 Max None method
-def check_max_none_values(values):
-    if not graphite.options.maxnone.isdigit():
-        print "Limit of None values have to be a digit (false param : -m %s)" % (str(graphite.options.maxnone))
-        sys.exit(3)
-    none_limit=float(graphite.options.maxnone)
-    percent_nones = 100 * float(values.count("None"))/float(len(values))
-    
-    if graphite.options.treatnonescritical == "no":
-      status_output = "Status UNKNOWN"
-      nones_exceeded_exit_code = 3
-    else:
-      status_output = "Status CRITICAL"
-      nones_exceeded_exit_code = 2      
-  
-    if percent_nones > none_limit:
-        print "%s, over %s percent (limit) of values are None. (sum values : %s, sum \"None\" : %s, percent \"None\": %.2f%%)" % (status_output,str(none_limit),str(len(values)),str(values.count("None")),percent_nones) 
-        sys.exit(nones_exceeded_exit_code)           
-    return
+
+# test if there are too much of none values in raw data
+def check_max_none_values(values, maxnones, treatnonescritical):
+
+    if values:
+        nones_limit=float(maxnones)
+        nones_count=float(values.count("None"))
+        values_count=float(len(values))
+
+        percent_nones = 100 * nones_count/values_count
+        if percent_nones > nones_limit:
+            message = "Over %s percent (limit) of values are None. (sum values : %s, sum \"None\" : %s, percent \"None\": %.2f%%)" % (str(nones_limit),str(values_count),str(nones_count),percent_nones)
+
+            if treatnonescritical:
+                exit_critical(message)
+            else:
+                exit_unknown(message)
 
 # retrieve data from graphite host
 def get_data_from_graphite(url):
-    req = urllib2.Request(url, headers={'Accept-Encoding': ''})
-    usock = urllib2.urlopen(req)
-    data = usock.read().rstrip()
-    usock.close()
-
-    if graphite.options.debug == 'yes':
-        print "\n[Debug] Origin data from Graphite:\n%s" % data
-
+    try:
+        request = urllib2.Request(url, headers={'Accept-Encoding': ''})
+        socket = urllib2.urlopen(request)
+        data = socket.read().rstrip()
+        socket.close()
+    except Exception as exception:
+        exit_unknown("Could not retrieve data from graphite: %s") % str(exception)
     return data
 
-functionmap = {
-  "hw":{  "label": "hw", "function": f_hw },
-  "sixSigma":{  "label": "sixSigma", "function": lambda x: None},
-  "avg":{  "label": "average", "function": f_avg },
-  "last":{ "label": "last",    "function": f_last },
-  "min":{  "label": "minimum", "function": f_min },
-  "max":{  "label": "maximum", "function": f_max },
-  "sum":{  "label": "sum",  "function": f_sum }
-}
+def evaluate_single_metric(data):
+    #TODO: extract parsing
+    try:
+        pieces = data.split("|")
+        counter = pieces[0].split(",")[0]
+        values = pieces[1].split(",")
+        if len(data.strip().split('\n')) > 1:
+            raise 'Graphite returned multiple lines'
+    except:
+        exit_unknown("Graphite returned bad data")
+    check_max_none_values(values)
 
-graphite = Plugin("Plugin to retrieve data from graphite", "1.0")
-graphite.add_option("u", "url", "URL to query for data", required=True)
-graphite.add_option("U", "username", "User for authentication")
-graphite.add_option("P", "password", "Password for authentication")
-graphite.add_option("d", "debug", "Debug/verbose mode ('yes' or 'no' , default = no)", default="no")
-graphite.add_option("H", "hostname", "Host name to use in the URL")
-graphite.add_option("m", "maxnone", "Number of percent of None values as limit e.g. -m 5 means less then 5 percent of None values are allowed.(default=20%)",default="20")
-graphite.add_option("n", "none", "Ignore None values: 'yes' or 'no' (default no)")
-graphite.add_option("e", "treatnonescritical", "Print a critical status instead of a warning if none level is exceeded - ignored in -n option is used ('yes' or 'no', default = no)",default="no")
-graphite.add_option("h", "critupper", "Upper Holt-Winters band breach causes a crit - breaching lower band causes a warn - use it together with -f hw. ('yes' or 'no', default = yes)",default="yes")
-graphite.add_option("l", "critlower", "Lower Holt-Winters band breach causes a crit - breaching upper band causes a warn - use it together with -f hw. ('yes' or 'no', default = yes)",default="yes")
-graphite.add_option("f", "function", "Function to run on retrieved values: avg/min/max/last/sum/hw (hw = Holt-Winters). Default is 'avg'", default="avg")
-graphite.add_option("p", "printperformancedata", "Add performance data to output", default="yes")
-
-graphite.enable_status("warning")
-graphite.enable_status("critical")
-graphite.start()
-
-if graphite.options.username and graphite.options.password:
-    password_mgr = urllib2.HTTPPasswordMgrWithDefaultRealm()
-    password_mgr.add_password(None,uri=graphite.options.url,
-                            user=graphite.options.username,
-                            passwd=graphite.options.password)
-    auth_handler =urllib2.HTTPBasicAuthHandler(password_mgr)
-    opener = urllib2.build_opener(auth_handler)
-    urllib2.install_opener(opener)
-
-if graphite.options.hostname:
-    graphite.options.url = graphite.options.url.replace('@HOSTNAME@', 
-    graphite.options.hostname.replace('.','_'))
-
-if graphite.options.function not in functionmap:
-    graphite.unknown_error("Bad function name given to -f/--function option: '%s'" % graphite.options.function)
-
-data = get_data_from_graphite(graphite.options.url)
-
-if graphite.options.function in ['hw', 'sixSigma']:
-    if graphite.options.function == 'hw':
-        prefix = 'holtWintersConfidence'
-    elif graphite.options.function == 'sixSigma':
-        prefix = 'sixSigma'
+    if args.ignorenones:
+        values = map(lambda x: float(x), filter(lambda x: x != 'None', values))
+        if debug:
+            print "[Debug] None values are ignored (removed):\n%s\n" % values
     else:
-        raise Exception
+        values = map(lambda x: 0.0 if x == 'None' else float(x), values)
+        if debug == 'yes':
+            print "[Debug] None values are not ignored (NONE = 0.0):\n%s\n" % values
+    if len(values) == 0:
+        exit_unknown("Graphite returned an empty list of values")
+    else:
+        value = functionmap[args.function]["function"](values)
+    if debug == 'yes':
+        print "[Debug] Average value from this script:\n%s\n" % str(value)
 
-    # Here we handle the data as Holt-Winters and exit with message - all without NagAconda functionality because NagAconda can't do Holt-Winters  
+    graphite.set_value(counter, value)
+    graphite.set_status_message("%s value of %s: %f" % (functionmap[args.function]["label"], counter, value))
+
+    # TODO: print perfdata
+
+def evaluate_holt_winters_metric(data):
     if len(data.strip().split('\n')) == 1:
         raise 'Graphite returned one line but three lines are needed for Holt-Winters (hw)'
-    graphite_data, graphite_lower, graphite_upper = get_confindence_bands(data, 0, prefix)
+    graphite_data, graphite_lower, graphite_upper = get_confindence_bands(data, 0)
     print "Current value: %s, lower band: %s, upper band: %s" % (graphite_data, graphite_lower, graphite_upper)
+
+    # TODO: check if this is a good idea and use exit functions
     if (graphite_data > graphite_upper) or (graphite_data < graphite_lower):
-        if graphite.options.critupper == 'yes' or graphite.options.critlower == 'yes' :
+        if args.critupper == 'yes' or args.critlower == 'yes' :
             sys.exit(2)
         else:
             sys.exit(1)
     else:
         sys.exit(0)
 
-    sys.exit(6)
-else:
-    # Here is the normal NagAconda handle (even not Holt-Winters)  
-    try:
-        pieces = data.split("|")
-        counter = pieces[0].split(",")[0]
-        values = pieces[1].split(",")      
-        if len(data.strip().split('\n')) > 1:
-            raise 'Graphite returned multiple lines'
-    except:
-        graphite.unknown_error("Graphite returned bad data")
-    
-    # Here we are check proportion of None values in the sum of values and exit with unknown if max limit is reached  
-    check_max_none_values(values)         
-                     
-    if graphite.options.none == 'yes':
-        values = map(lambda x: float(x), filter(lambda x: x != 'None', values))
-        if graphite.options.debug == 'yes':
-            print "[Debug] None values are ignored (removed):\n%s\n" % values
-    else:
-        values = map(lambda x: 0.0 if x == 'None' else float(x), values)
-        if graphite.options.debug == 'yes':
-            print "[Debug] None values are not ignored (NONE = 0.0):\n%s\n" % values
-    if len(values) == 0:
-        graphite.unknown_error("Graphite returned an empty list of values")
-    else:
-        value = functionmap[graphite.options.function]["function"](values)
-    if graphite.options.debug == 'yes':
-        print "[Debug] Average value from this script:\n%s\n" % str(value)   
-    
-    graphite.set_value(counter, value)
-    
-    graphite.set_status_message("%s value of %s: %f" % (functionmap[graphite.options.function]["label"], counter, value))
+# main action
+def main(args):
 
-    try :
-        if graphite.options.printperformancedata == "yes":
-          graphite.set_print_performance_data(True)
-        else:
-          graphite.set_print_performance_data(False)
-    except AttributeError:
-        pass
-    
-    graphite.finish()
+    global debug
+    # check if debug option is set
+    if args.debug:
+        print "debug mode on"
+        debug = True
+    else:
+        debug = False
 
+    if args.function not in functionmap:
+        exit_unknown("Bad function name given to --function option: '%s'" % args.function)
+
+    data = get_data_from_graphite(args.url)
+
+# parameter handling separation
+if __name__ == '__main__':
+    # parameter handling
+    parser = argparse.ArgumentParser()
+    parser.add_argument("url", help="URL to query for data", type=str)
+    parser.add_argument("--debug", help="Debug/verbose mode", action="store_true")
+    parser.add_argument("--maxnones", help="Number of percent of None values as limit e.g. -m 5 means less then 5 percent of None values are allowed.(default=20%)", default=20, type=int)
+    parser.add_argument("--ignorenones", help="Ignore None values", action="store_true", default=False)
+    parser.add_argument("--treatnonescritical", help="Print a critical status instead of a warning if none level is exceeded", action="store_true", default=False)
+    parser.add_argument("--critupper", help="Upper Holt-Winters band breach causes a crit - breaching lower band causes a warn - use it together with -f hw.", action="store_true", default=True)
+    parser.add_argument("--critlower", help="Lower Holt-Winters band breach causes a crit - breaching upper band causes a warn - use it together with -f hw.", action="store_true", default=True)
+    parser.add_argument("--function", help="Function to run on retrieved values: avg/min/max/last/sum/hw (hw = Holt-Winters). Default is 'avg'", type=str, default="avg")
+    parser.add_argument("--printperformancedata", help="Add performance data to output", action="store_true", default=True)
+    parser.add_argument("-w", help="Warning treshold", type=float)
+    parser.add_argument("-c", help="Critical treshold", type=float)
+    args = parser.parse_args()
+    main(args)
