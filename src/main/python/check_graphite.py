@@ -149,16 +149,21 @@ def get_data_from_graphite(url):
         exit_unknown("Could not retrieve data from graphite: %s") % str(exception)
     return data
 
-def evaluate_single_metric(data):
-    #TODO: extract parsing
-    try:
-        pieces = data.split("|")
-        counter = pieces[0].split(",")[0]
-        values = pieces[1].split(",")
-        if len(data.strip().split('\n')) > 1:
-            raise 'Graphite returned multiple lines'
-    except:
-        exit_unknown("Graphite returned bad data")
+def get_metrics_count(data):
+    return len(data.strip().split('\n'))
+
+def parse_rawdata(raw_data):
+    pieces = raw_data.split("|")
+    counter = pieces[0].split(",")[0]
+    values = pieces[1].split(",")
+    return counter, values
+
+def evaluate_single_metric(raw_data):
+    if get_metrics_count(rawdata) > 1:
+        exit_unknown("Graphite returned multiple metrics, need only one to check!")
+
+    counter, values = parse_rawdata(raw_data)
+
     check_max_none_values(values)
 
     if args.ignorenones:
@@ -181,10 +186,11 @@ def evaluate_single_metric(data):
 
     # TODO: print perfdata
 
-def evaluate_holt_winters_metric(data):
-    if len(data.strip().split('\n')) == 1:
-        raise 'Graphite returned one line but three lines are needed for Holt-Winters (hw)'
-    graphite_data, graphite_lower, graphite_upper = get_confindence_bands(data, 0)
+def evaluate_holt_winters_metric(rawdata):
+    if get_metrics_count(rawdata) != 3:
+        exit_unknown("Graphite did not return 3 metrics, check your configuration!")
+
+    graphite_data, graphite_lower, graphite_upper = get_confindence_bands(rawdata, 0)
     print "Current value: %s, lower band: %s, upper band: %s" % (graphite_data, graphite_lower, graphite_upper)
 
     # TODO: check if this is a good idea and use exit functions
@@ -211,6 +217,12 @@ def main(args):
         exit_unknown("Bad function name given to --function option: '%s'" % args.function)
 
     data = get_data_from_graphite(args.url)
+
+    if args.function == "hw":
+        evaluate_holt_winters_metric(data)
+    else:
+        evaluate_single_metric(data)
+
 
 # parameter handling separation
 if __name__ == '__main__':
