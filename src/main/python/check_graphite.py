@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # Copyright (c) 2011 Recoset <nicolas@recoset.com>
 # 
@@ -21,6 +21,7 @@
 # THE SOFTWARE.
 
 # IS24: Add Holt-Winters and debug/verbose at Do 4. Jul 17:45:29 CEST 2013    
+# IS24: Add sixSigma at Thu Feb 20 16:10:17 CET 2014
 
 from NagAconda import Plugin
 import urllib2
@@ -28,7 +29,7 @@ import sys
 
 # Methods
 def f_avg(values):
-  return sum(values)/len(values);
+  return sum(values)/len(values)
 
 def f_last(values):
   return values[-1]
@@ -72,14 +73,16 @@ def eval_graphite_data(data, seconds):
             data_value = 0.0
     return data_value
 
-def get_hw_value(hwdata, seconds=0):
-    """Get the Holt-Winters value from a Graphite graph"""
+def get_confindence_bands(hwdata, seconds=0, prefix='holtWintersConfidence'):
+    """Get confidene bands value from a Graphite graph"""
 
     data = hwdata
-    for line in data.split():
-        if line.startswith('holtWintersConfidenceUpper'):
+    for line in data.split('\n'):
+        if line.startswith(prefix + 'Mean'):
+            continue
+        elif line.startswith(prefix + 'Upper'):
             graphite_upper = eval_graphite_data(line, seconds)
-        elif line.startswith('holtWintersConfidenceLower'):
+        elif line.startswith(prefix + 'Lower'):
             graphite_lower = eval_graphite_data(line, seconds)
         else:
             graphite_data = eval_graphite_data(line, seconds)
@@ -111,6 +114,7 @@ def check_max_none_values(values):
 
 functionmap = {
   "hw":{  "label": "hw", "function": f_hw },
+  "sixSigma":{  "label": "sixSigma", "function": lambda x: None},
   "avg":{  "label": "average", "function": f_avg },
   "last":{ "label": "last",    "function": f_last },
   "min":{  "label": "minimum", "function": f_min },
@@ -161,11 +165,18 @@ if graphite.options.debug == 'yes':
 if graphite.options.function not in functionmap:
     graphite.unknown_error("Bad function name given to -f/--function option: '%s'" % graphite.options.function)
 
-if graphite.options.function == 'hw':
+if graphite.options.function in ['hw', 'sixSigma']:
+    if graphite.options.function == 'hw':
+        prefix = 'holtWintersConfidence'
+    elif graphite.options.function == 'sixSigma':
+        prefix = 'sixSigma'
+    else:
+        raise Exception
+
     # Here we handle the data as Holt-Winters and exit with message - all without NagAconda functionality because NagAconda can't do Holt-Winters  
     if len(data.strip().split('\n')) == 1:
         raise 'Graphite returned one line but three lines are needed for Holt-Winters (hw)'
-    graphite_data, graphite_lower, graphite_upper = get_hw_value(data, 0)
+    graphite_data, graphite_lower, graphite_upper = get_confindence_bands(data, 0, prefix)
     print "Current value: %s, lower band: %s, upper band: %s" % (graphite_data, graphite_lower, graphite_upper)
     if (graphite_data > graphite_upper) or (graphite_data < graphite_lower):
         if graphite.options.critupper == 'yes' or graphite.options.critlower == 'yes' :
@@ -209,10 +220,13 @@ else:
     
     graphite.set_status_message("%s value of %s: %f" % (functionmap[graphite.options.function]["label"], counter, value))
 
-    if graphite.options.printperformancedata == "yes":
-      graphite.set_print_performance_data(True)
-    else:
-      graphite.set_print_performance_data(False)
+    try :
+        if graphite.options.printperformancedata == "yes":
+          graphite.set_print_performance_data(True)
+        else:
+          graphite.set_print_performance_data(False)
+    except AttributeError:
+        pass
     
     graphite.finish()
 
