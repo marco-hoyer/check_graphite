@@ -1,29 +1,5 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2011 Recoset <nicolas@recoset.com>
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-# IS24: Add Holt-Winters and debug/verbose at Do 4. Jul 17:45:29 CEST 2013    
-# IS24: Add sixSigma at Thu Feb 20 16:10:17 CET 2014
-
-from NagAconda import Plugin
 import argparse
 import urllib2
 import sys
@@ -49,7 +25,6 @@ def f_hw(values):
 
 functionmap = {
   "hw":{  "label": "hw", "function": f_hw },
-  "sixSigma":{  "label": "sixSigma", "function": lambda x: None},
   "avg":{  "label": "average", "function": f_avg },
   "last":{ "label": "last",    "function": f_last },
   "min":{  "label": "minimum", "function": f_min },
@@ -118,8 +93,6 @@ def get_confindence_bands(hwdata, seconds=0, prefix='holtWintersConfidence'):
             graphite_data = eval_graphite_data(line, seconds)
 
     return graphite_data, graphite_lower, graphite_upper
-  
-
 
 # test if there are too much of none values in raw data
 def check_max_none_values(values, maxnones, treatnonescritical):
@@ -174,12 +147,8 @@ def evaluate_single_metric(raw_data):
         values = map(lambda x: 0.0 if x == 'None' else float(x), values)
         if debug == 'yes':
             print "[Debug] None values are not ignored (NONE = 0.0):\n%s\n" % values
-    if len(values) == 0:
-        exit_unknown("Graphite returned an empty list of values")
-    else:
-        value = functionmap[args.function]["function"](values)
-    if debug == 'yes':
-        print "[Debug] Average value from this script:\n%s\n" % str(value)
+
+    value = functionmap[args.function]["function"](values)
 
     graphite.set_value(counter, value)
     graphite.set_status_message("%s value of %s: %f" % (functionmap[args.function]["label"], counter, value))
@@ -217,6 +186,8 @@ def main(args):
         exit_unknown("Bad function name given to --function option: '%s'" % args.function)
 
     data = get_data_from_graphite(args.url)
+    if not data:
+        exit_unknown("Received no data from graphite!")
 
     if args.function == "hw":
         evaluate_holt_winters_metric(data)
